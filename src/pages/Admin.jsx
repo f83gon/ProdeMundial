@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext.jsx'
 import { Navigate } from 'react-router-dom'
-import * as XLSX from 'xlsx'
+import * as XLSX from 'xlsx-js-style'
 
 export default function Admin() {
   const { isAdmin } = useAuth()
@@ -427,20 +427,91 @@ function AdminImportar() {
   }, [])
 
   const downloadTemplate = () => {
-    const rows = matches.map(m => ({
-      '#': m.match_order,
-      'Fecha': m.match_date,
-      'Hora': m.match_time?.slice(0, 5),
-      'Día': m.match_day || '',
-      'Local': m.home_team,
-      'Visitante': m.away_team,
-      'Pronóstico (1/X/2)': ''
-    }))
-    const ws = XLSX.utils.json_to_sheet(rows)
+    // Styles
+    const titleStyle = { font: { bold: true, sz: 16, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '1B5E20' } }, alignment: { horizontal: 'center', vertical: 'center' } }
+    const subtitleStyle = { font: { bold: true, sz: 12, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '2E7D32' } }, alignment: { horizontal: 'center', vertical: 'center' } }
+    const instructionStyle = { font: { italic: true, sz: 11, color: { rgb: '333333' } }, alignment: { horizontal: 'center', vertical: 'center' } }
+    const headerStyle = { font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '37474F' } }, alignment: { horizontal: 'center', vertical: 'center' }, border: { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } } }
+    const dataStyle = { alignment: { horizontal: 'center', vertical: 'center' }, border: { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } } }
+    const editableStyle = { alignment: { horizontal: 'center', vertical: 'center' }, fill: { fgColor: { rgb: 'FFF9C4' } }, border: { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'medium' }, right: { style: 'medium' } }, protection: { locked: false } }
+    const lockedStyle = { ...dataStyle, protection: { locked: true } }
+
+    // Build sheet data
+    const sheetData = []
+    sheetData.push(['', '', 'EL PRODE DEL MUNDIAL DE FUTBOL', '', '', '', '', '', ''])
+    sheetData.push(['', '', 'Edición IX - La Última', '', '', '', '', '', ''])
+    sheetData.push(['', '', '', '', '', '', '', '', ''])
+    sheetData.push(['', '', 'Marcá con una X tu pronóstico para cada partido', '', '', '', '', '', ''])
+    sheetData.push(['', '', '', '', '', '', '', '', ''])
+    sheetData.push(['#', 'Fecha', 'Hora', 'Día', 'Gana Local', 'Local', 'Empate', 'Visitante', 'Gana Visitante'])
+
+    matches.forEach(m => {
+      sheetData.push([
+        m.match_order,
+        m.match_date,
+        m.match_time?.slice(0, 5) || '',
+        m.match_day || '',
+        '',
+        m.home_team,
+        '',
+        m.away_team,
+        '',
+      ])
+    })
+
+    const ws = XLSX.utils.aoa_to_sheet(sheetData)
+
+    // Column widths
     ws['!cols'] = [
       { wch: 4 }, { wch: 12 }, { wch: 6 }, { wch: 12 },
-      { wch: 20 }, { wch: 20 }, { wch: 18 }
+      { wch: 14 }, { wch: 20 }, { wch: 10 }, { wch: 20 }, { wch: 16 },
     ]
+
+    // Merge title cells
+    ws['!merges'] = [
+      { s: { r: 0, c: 2 }, e: { r: 0, c: 8 } },
+      { s: { r: 1, c: 2 }, e: { r: 1, c: 8 } },
+      { s: { r: 3, c: 2 }, e: { r: 3, c: 8 } },
+    ]
+
+    // Apply styles to all cells
+    const range = XLSX.utils.decode_range(ws['!ref'])
+    const editableCols = [4, 6, 8] // Gana Local, Empate, Gana Visitante
+
+    for (let R = range.s.r; R <= range.e.r; R++) {
+      for (let C = range.s.c; C <= range.e.c; C++) {
+        const addr = XLSX.utils.encode_cell({ r: R, c: C })
+        if (!ws[addr]) ws[addr] = { v: '', t: 's' }
+
+        if (R === 0) ws[addr].s = titleStyle
+        else if (R === 1) ws[addr].s = subtitleStyle
+        else if (R === 3) ws[addr].s = instructionStyle
+        else if (R === 5) ws[addr].s = headerStyle
+        else if (R >= 6) {
+          ws[addr].s = editableCols.includes(C) ? editableStyle : lockedStyle
+        }
+      }
+    }
+
+    // Sheet protection - only editable cells (yellow) can be modified
+    ws['!protect'] = { password: '', sheet: true, objects: true, scenarios: true, selectLockedCells: false, selectUnlockedCells: false }
+
+    // Data validation: only X or empty in editable columns
+    ws['!dataValidation'] = []
+    for (let R = 6; R <= range.e.r; R++) {
+      for (const C of editableCols) {
+        const addr = XLSX.utils.encode_cell({ r: R, c: C })
+        ws['!dataValidation'].push({
+          sqref: addr,
+          type: 'list',
+          formula1: '"X,"',
+          showErrorMessage: true,
+          errorTitle: 'Valor inválido',
+          error: 'Solo podés poner X o dejar vacío'
+        })
+      }
+    }
+
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Pronósticos')
     XLSX.writeFile(wb, 'Prode_Mundial_2026_Plantilla.xlsx')
@@ -467,7 +538,23 @@ function AdminImportar() {
 
       for (const row of rows) {
         const order = row['#']
-        const pred = String(row['Pronóstico (1/X/2)'] || '').trim().toUpperCase()
+        if (!order || typeof order !== 'number') continue
+
+        // Support new format (X in columns) or old format (1/X/2)
+        let pred = ''
+        const ganaLocal = String(row['Gana Local'] || '').trim().toUpperCase()
+        const empate = String(row['Empate'] || '').trim().toUpperCase()
+        const ganaVisitante = String(row['Gana Visitante'] || '').trim().toUpperCase()
+        const oldPred = String(row['Pronóstico (1/X/2)'] || '').trim().toUpperCase()
+
+        // Validate only one selection per row
+        const selections = [ganaLocal === 'X', empate === 'X', ganaVisitante === 'X'].filter(Boolean).length
+        if (selections > 1) { errors.push(`Fila #${order}: tiene más de una X marcada`); continue }
+
+        if (ganaLocal === 'X') pred = '1'
+        else if (empate === 'X') pred = 'X'
+        else if (ganaVisitante === 'X') pred = '2'
+        else if (['1', 'X', '2'].includes(oldPred)) pred = oldPred
 
         if (!pred) { errors.push(`Fila #${order}: sin pronóstico`); continue }
         if (!['1', 'X', '2'].includes(pred)) { errors.push(`Fila #${order}: valor inválido "${pred}"`); continue }

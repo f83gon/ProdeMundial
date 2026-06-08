@@ -46,9 +46,17 @@ export default function TablaGlobal() {
   const [lastFinishedOrder, setLastFinishedOrder] = useState(null)
 
   useEffect(() => {
-    supabase.from('users').select('id, username, total_points')
-      .order('total_points', { ascending: false })
-      .then(({ data }) => setRows(data || []))
+    supabase.rpc('get_full_ranking')
+      .then(({ data, error }) => {
+        if (error) {
+          // Fallback si la función no existe aún
+          supabase.from('users').select('id, username, total_points')
+            .order('total_points', { ascending: false })
+            .then(({ data }) => setRows((data || []).map(r => ({ ...r, is_pending: false }))))
+        } else {
+          setRows(data || [])
+        }
+      })
   }, [])
 
   // Cargar matriz para todos los usuarios + último partido finalizado
@@ -90,18 +98,21 @@ export default function TablaGlobal() {
           </thead>
           <tbody>
             {rows.map((r, i) => {
-              const isMe = r.id === me
-              const isFriend = friendIds.has(r.id)
+              const isMe = r.user_id === me
+              const isFriend = friendIds.has(r.user_id)
               return (
-                <tr key={r.id} className={`${isMe ? 'bg-emerald-900/40' : i%2 ? 'bg-slate-900' : 'bg-slate-800/50'}`}>
+                <tr key={r.user_id || r.username} className={`${isMe ? 'bg-emerald-900/40' : i%2 ? 'bg-slate-900' : 'bg-slate-800/50'}`}>
                   <td className="p-2">{i+1}</td>
-                  <td className="p-2">{r.username}{isMe && ' (vos)'}</td>
+                  <td className="p-2">
+                    {r.username}{isMe && ' (vos)'}
+                    {r.is_pending && <span className="ml-1 text-xs text-amber-400" title="Sin usuario asignado">📋</span>}
+                  </td>
                   <td className="p-2 text-right font-bold">{r.total_points}</td>
                   <td className="p-2 text-right">
-                    {!isMe && (
+                    {!isMe && !r.is_pending && (
                       isFriend
-                        ? <button onClick={()=>removeFriend(r.id)} className="px-2 py-1 rounded bg-rose-700 hover:bg-rose-600 text-xs">✕</button>
-                        : <button onClick={()=>addFriend(r.id)} className="px-2 py-1 rounded bg-sky-700 hover:bg-sky-600 text-xs">+</button>
+                        ? <button onClick={()=>removeFriend(r.user_id)} className="px-2 py-1 rounded bg-rose-700 hover:bg-rose-600 text-xs">✕</button>
+                        : <button onClick={()=>addFriend(r.user_id)} className="px-2 py-1 rounded bg-sky-700 hover:bg-sky-600 text-xs">+</button>
                     )}
                   </td>
                 </tr>
